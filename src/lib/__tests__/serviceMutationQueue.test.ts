@@ -101,6 +101,28 @@ describe("serviceMutationQueue", () => {
     expect(getServiceMutationQueueSnapshot().total).toBe(0);
   });
 
+  it("does not replay a queued create when the existence preflight is unavailable", async () => {
+    setOnline(false);
+    await runServiceMutation({
+      kind: "service.create",
+      serviceId: "uncertain",
+      path: "/api/v1/services",
+      body: { serviceId: "uncertain", priceStroops: 40 },
+    });
+
+    setOnline(true);
+    apiGetMock.mockRejectedValueOnce(new TypeError("temporary read failure"));
+
+    await flushServiceMutationQueue();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(getServiceMutationQueueSnapshot()).toMatchObject({
+      pending: 1,
+      conflicts: 0,
+      total: 1,
+    });
+  });
+
   it("surfaces a server conflict instead of replaying past it", async () => {
     setOnline(false);
     await runServiceMutation({
@@ -117,7 +139,7 @@ describe("serviceMutationQueue", () => {
       statusText: "Conflict",
       json: async () => ({ message: "already exists" }),
     });
-    apiGetMock.mockRejectedValueOnce(new Error("not found"));
+    apiGetMock.mockRejectedValueOnce(Object.assign(new Error("not found"), { status: 404 }));
     apiGetMock.mockResolvedValue({ serviceId: "conflicted", priceStroops: 99 } as never);
 
     await flushServiceMutationQueue();
