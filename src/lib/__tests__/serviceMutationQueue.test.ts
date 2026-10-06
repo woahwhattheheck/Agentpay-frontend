@@ -167,6 +167,38 @@ describe("serviceMutationQueue", () => {
     expect(getServiceMutationQueueSnapshot()).toMatchObject({ conflicts: 1, total: 1 });
   });
 
+  it("surfaces a deleted edit target as a conflict instead of retrying forever", async () => {
+    setOnline(false);
+    await runServiceMutation({
+      kind: "service.price.update",
+      serviceId: "deleted",
+      path: "/api/v1/services/deleted/price",
+      body: { priceStroops: 20 },
+      basePriceStroops: 10,
+    });
+
+    setOnline(true);
+    apiGetMock.mockRejectedValueOnce(
+      Object.assign(new Error("not found"), { status: 404 }),
+    );
+
+    await flushServiceMutationQueue();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(getServiceMutationQueueSnapshot()).toMatchObject({
+      pending: 0,
+      conflicts: 1,
+      total: 1,
+    });
+    const stored = JSON.parse(
+      localStorage.getItem(SERVICE_MUTATION_QUEUE_STORAGE_KEY)!,
+    );
+    expect(stored[0]).toMatchObject({
+      state: "conflict",
+      errorCode: "server_conflict",
+    });
+  });
+
   it("retains a confirmed write until readback can verify its server state", async () => {
     setOnline(false);
     await runServiceMutation({
