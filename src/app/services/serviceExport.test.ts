@@ -32,8 +32,17 @@ describe("serviceExport", () => {
     expect(csv).toContain('"svc,""quoted""\nline"');
   });
 
-  it.each(["=2+3", "+2+3", "-2+3", "@SUM(A1:A2)"])(
-    "neutralizes spreadsheet formula trigger %s",
+  it.each([
+    "=2+3",
+    "+2+3",
+    "-2+3",
+    "@SUM(A1:A2)",
+    " =2+3",
+    "\t+2+3",
+    "\r-2+3",
+    "\n@SUM(A1:A2)",
+  ])(
+    "neutralizes spreadsheet formula trigger %j",
     (value) => {
       expect(escapeCsvCell(value)).toBe(`"'${value}"`);
     },
