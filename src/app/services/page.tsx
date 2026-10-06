@@ -11,6 +11,7 @@ import { Spinner } from "@/components/Spinner";
 import { truncateMiddle } from "@/lib/format";
 import { useToast } from "@/components/ToastProvider";
 import { useClipboard } from "@/lib/useClipboard";
+import { ServiceExportActions } from "./ServiceExportActions";
 
 type Service = { serviceId: string; priceStroops: number; createdAt?: number | string | null };
 type ServicesResponse = {
@@ -266,6 +267,9 @@ export default function ServicesPage() {
         </Link>
       </header>
       <ErrorMessage title="Failed to load services" detail={error} />
+      {!loading && !error && services && (
+        <ServiceExportActions services={sortedServices ?? []} />
+      )}
       {loading && (
         <div className="flex justify-center py-10">
           <Spinner label="Loading services" />
