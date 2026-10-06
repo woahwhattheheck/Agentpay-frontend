@@ -295,7 +295,7 @@ describe("useApiMutation", () => {
   });
 
   it("returns the resolved data from mutate", async () => {
-    const mutationFn = jest.fn(async () => ({ id: "created" }));
+    const mutationFn = jest.fn(async (_vars: Vars) => ({ id: "created" }));
     let result: Payload | undefined;
 
     function ReturnProbe() {
@@ -332,7 +332,7 @@ describe("useApiMutation", () => {
   });
 
   it("rethrows the rejection from mutate after setting error state", async () => {
-    const mutationFn = jest.fn(() => Promise.reject(new Error("nope")));
+    const mutationFn = jest.fn((_vars: Vars) => Promise.reject(new Error("nope")));
     let caught: Error | undefined;
 
     function ThrowProbe() {
