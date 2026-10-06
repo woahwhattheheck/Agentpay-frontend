@@ -2,12 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { apiPost } from "@/lib/apiClient";
 import { PageShell } from "@/components/PageShell";
 import { TextField } from "@/components/TextField";
 import { Button } from "@/components/Button";
 import { parseNonNegativeInt } from "@/lib/validateNumber";
 import { useApiMutation } from "@/lib/useApiMutation";
+import { runServiceMutation } from "@/lib/serviceMutationQueue";
 
 type CreateServiceBody = {
   serviceId: string;
@@ -19,10 +19,19 @@ export default function NewServicePage() {
   const [serviceId, setServiceId] = useState("");
   const [priceStroops, setPriceStroops] = useState("");
   const [priceError, setPriceError] = useState<string | null>(null);
+  const [queued, setQueued] = useState(false);
 
   const { mutate, status, error, reset } = useApiMutation(
     (body: CreateServiceBody, { signal }) =>
-      apiPost("/api/v1/services", body, { signal }),
+      runServiceMutation<unknown>(
+        {
+          kind: "service.create",
+          serviceId: body.serviceId,
+          path: "/api/v1/services",
+          body,
+        },
+        { signal },
+      ),
   );
 
   const loading = status === "pending";
@@ -30,6 +39,7 @@ export default function NewServicePage() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     reset();
+    setQueued(false);
     setPriceError(null);
 
     const parsed = parseNonNegativeInt(priceStroops);
@@ -39,10 +49,14 @@ export default function NewServicePage() {
     }
 
     try {
-      await mutate({
+      const result = await mutate({
         serviceId,
         priceStroops: parsed.value,
       });
+      if (result.queued) {
+        setQueued(true);
+        return;
+      }
       router.push("/services");
     } catch {
       // Error message is already mirrored on the mutation `error` state.
@@ -74,12 +88,17 @@ export default function NewServicePage() {
         <Button
           type="submit"
           loading={loading}
-          disabled={loading}
+          disabled={loading || queued}
           className="self-start"
         >
-          {loading ? "Saving…" : "Register service"}
+          {loading ? "Saving…" : queued ? "Queued for sync" : "Register service"}
         </Button>
 
+        {queued && (
+          <p role="status" className="text-sm text-amber-700 dark:text-amber-300">
+            Service registration is saved on this device and will sync when connectivity returns.
+          </p>
+        )}
         {error && (
           <p role="alert" className="text-sm text-rose-600">
             {error}
