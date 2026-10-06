@@ -105,6 +105,7 @@ function createHttpError(status: number, body: unknown, statusText = "") {
   const err = new Error(message);
 
   return Object.assign(err, apiError ?? {}, {
+    status,
     error:
       typeof apiError?.error === "string" && apiError.error.length > 0
         ? apiError.error
