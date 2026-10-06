@@ -29,7 +29,7 @@ describe("validateNumber", () => {
         value: max,
       });
 
-      const above = BigInt(max) + 1n;
+      const above = BigInt(max) + BigInt(1);
       expect(parseNonNegativeInt(String(above))).toEqual({
         ok: false,
         message: NON_NEG_MSG,
@@ -148,7 +148,7 @@ describe("validateNumber", () => {
     });
 
     it("rejects strings that look like large unsafe integers", () => {
-      const unsafe1 = String(BigInt(MAX_SAFE_INTEGER_VAL) + 100n);
+      const unsafe1 = String(BigInt(MAX_SAFE_INTEGER_VAL) + BigInt(100));
       expect(parseNonNegativeInt(unsafe1)).toEqual({
         ok: false,
         message: NON_NEG_MSG,
@@ -169,7 +169,7 @@ describe("validateNumber", () => {
         value: max,
       });
 
-      const above = BigInt(max) + 1n;
+      const above = BigInt(max) + BigInt(1);
       expect(parsePositiveInt(String(above))).toEqual({
         ok: false,
         message: POS_MSG,
@@ -250,7 +250,7 @@ describe("validateNumber", () => {
     });
 
     it("rejects strings that look like large unsafe integers", () => {
-      const unsafe1 = String(BigInt(MAX_SAFE_INTEGER_VAL) + 100n);
+      const unsafe1 = String(BigInt(MAX_SAFE_INTEGER_VAL) + BigInt(100));
       expect(parsePositiveInt(unsafe1)).toEqual({
         ok: false,
         message: POS_MSG,
