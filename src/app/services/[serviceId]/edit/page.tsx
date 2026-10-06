@@ -13,7 +13,6 @@ import {
   hydrateServiceSnapshot,
   runOptimisticServiceMutation,
   ServiceMutationError,
-  useOptimisticService,
 } from "@/lib/serviceOptimisticStore";
 
 type Service = { serviceId: string; priceStroops: number };
@@ -41,24 +40,10 @@ export default function EditServicePage({
   const [serverService, setServerService] = useState<Service | null>(null);
   const submitGenerationRef = useRef(0);
   const dirtyRef = useRef(false);
+  const pendingSavesRef = useRef(0);
 
   const dirty = originalPrice !== null && price !== originalPrice;
   const saving = pendingSaves > 0;
-  const visibleService = useOptimisticService(serviceId, serverService);
-
-  useEffect(() => {
-    if (!visibleService || dirty || saving) {
-      return;
-    }
-
-    const visiblePrice = String(visibleService.priceStroops);
-    if (price === visiblePrice && originalPrice === visiblePrice) {
-      return;
-    }
-
-    setPrice(visiblePrice);
-    setOriginalPrice(visiblePrice);
-  }, [visibleService, dirty, saving, price, originalPrice]);
 
   useEffect(() => {
     const load = async () => {
@@ -133,7 +118,8 @@ export default function EditServicePage({
     };
     const submission = ++submitGenerationRef.current;
 
-    setPendingSaves((count) => count + 1);
+    pendingSavesRef.current += 1;
+    setPendingSaves(pendingSavesRef.current);
 
     try {
       const canonical = await runOptimisticServiceMutation({
@@ -184,7 +170,19 @@ export default function EditServicePage({
       setError(message);
       setAnnouncement(message);
     } finally {
-      setPendingSaves((count) => Math.max(0, count - 1));
+      pendingSavesRef.current = Math.max(0, pendingSavesRef.current - 1);
+      setPendingSaves(pendingSavesRef.current);
+
+      if (pendingSavesRef.current === 0) {
+        const settled = getOptimisticService(serviceId);
+        if (settled) {
+          dirtyRef.current = false;
+          const settledPrice = String(settled.priceStroops);
+          setServerService(settled);
+          setPrice(settledPrice);
+          setOriginalPrice(settledPrice);
+        }
+      }
     }
   };
 
