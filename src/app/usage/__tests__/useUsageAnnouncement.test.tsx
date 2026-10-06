@@ -65,7 +65,7 @@ describe("useUsageAnnouncement", () => {
   it("does not announce on initial mount or the first settled result", () => {
     const { result, rerender } = renderHook(
       ({ state }) => useUsageAnnouncement(state),
-      { initialProps: { state: IDLE } }
+      { initialProps: { state: IDLE as UsageQueryStateLike } }
     );
 
     expect(result.current).toBe("");
@@ -210,7 +210,7 @@ describe("useUsageAnnouncement", () => {
     // is the baseline and is not announced.
     const { result, rerender } = renderHook(
       ({ state }) => useUsageAnnouncement(state),
-      { initialProps: { state: ERROR } }
+      { initialProps: { state: ERROR as UsageQueryStateLike } }
     );
     settle();
 
