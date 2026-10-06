@@ -1,0 +1,51 @@
+name: AgentPay Node 20 lock regeneration
+
+on:
+  push:
+    branches:
+      - ci/agentpay-lock-regen-node20-sol56
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Regenerate lock from sponsor package intent
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Prove clean install on Node 20
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Persist exact receipt and regenerated lock
+        shell: bash
+        run: |
+          {
+            echo "source_commit=${GITHUB_SHA}"
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            node - <<'NODE'
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          const root = lock.packages[''];
+          for (const name of ['@testing-library/jest-dom','eslint']) {
+            const section = pkg.devDependencies?.[name] ?? pkg.dependencies?.[name];
+            const lockSpec = root.devDependencies?.[name] ?? root.dependencies?.[name];
+            const resolved = lock.packages['node_modules/' + name]?.version;
+            const engines = lock.packages['node_modules/' + name]?.engines ?? null;
+            console.log(name + ' package=' + section + ' lock=' + lockSpec + ' resolved=' + resolved + ' engines=' + JSON.stringify(engines));
+          }
+          NODE
+            echo "npm_ci=PASS"
+          } > .github/agentpay-lock-regen-receipt.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json .github/agentpay-lock-regen-receipt.txt
+          git commit -m "chore(ci): regenerate Node 20 lock receipt [skip ci]"
+          git push
