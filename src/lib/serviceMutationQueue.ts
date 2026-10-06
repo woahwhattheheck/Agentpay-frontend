@@ -182,15 +182,27 @@ async function sendQueuedMutation(mutation: ServiceMutation): Promise<void> {
   throw Object.assign(new Error("Server rejected queued change"), { status: response.status });
 }
 
-async function serverPrice(mutation: ServiceMutation): Promise<number | null> {
+type ServerPriceState =
+  | { kind: "present"; priceStroops: number }
+  | { kind: "missing" }
+  | { kind: "unavailable" };
+
+async function serverPriceState(mutation: ServiceMutation): Promise<ServerPriceState> {
   try {
     const service = await apiGet<{ serviceId: string; priceStroops: number }>(
       `/api/v1/services/${encodeURIComponent(mutation.serviceId)}`,
     );
-    return service.serviceId === mutation.serviceId &&
-      typeof service.priceStroops === "number" ? service.priceStroops : null;
-  } catch {
-    return null;
+    if (
+      service.serviceId !== mutation.serviceId ||
+      typeof service.priceStroops !== "number"
+    ) {
+      return { kind: "unavailable" };
+    }
+    return { kind: "present", priceStroops: service.priceStroops };
+  } catch (error) {
+    return errorStatus(error) === 404
+      ? { kind: "missing" }
+      : { kind: "unavailable" };
   }
 }
 
@@ -265,26 +277,33 @@ export function flushServiceMutationQueue(): Promise<void> {
       if (!mutation || mutation.state === "conflict") break;
 
       try {
-        const before = await serverPrice(mutation);
-        if (before === mutation.body.priceStroops) {
+        const before = await serverPriceState(mutation);
+        if (
+          before.kind === "present" &&
+          before.priceStroops === mutation.body.priceStroops
+        ) {
           removeMutation(mutation.id);
           continue;
         }
+        // A failed preflight is not evidence that a create target is absent.
+        // Hold the queue rather than replaying a mutation against unknown state.
+        if (before.kind === "unavailable") break;
+
         if (mutation.kind === "service.price.update") {
-          if (before === null) break; // Cannot check the original price safely.
-          if (before !== mutation.basePriceStroops) {
+          if (before.kind === "missing") break;
+          if (before.priceStroops !== mutation.basePriceStroops) {
             markConflict(mutation, Object.assign(new Error(), { status: 409 }));
             break;
           }
-        } else if (before !== null) {
+        } else if (before.kind === "present") {
           markConflict(mutation, Object.assign(new Error(), { status: 409 }));
           break;
         }
 
         await sendQueuedMutation(mutation);
-        const after = await serverPrice(mutation);
-        if (after === null) break; // Keep the write for safe readback on retry.
-        if (after !== mutation.body.priceStroops) {
+        const after = await serverPriceState(mutation);
+        if (after.kind !== "present") break; // Keep the write for safe readback on retry.
+        if (after.priceStroops !== mutation.body.priceStroops) {
           markConflict(
             mutation,
             Object.assign(new Error("Server state differs from the queued change"), { status: 409 }),
@@ -295,8 +314,11 @@ export function flushServiceMutationQueue(): Promise<void> {
       } catch (error) {
         const status = errorStatus(error);
         if (status === 409 || status === 412) {
-          const after = await serverPrice(mutation);
-          if (after === mutation.body.priceStroops) {
+          const after = await serverPriceState(mutation);
+          if (
+            after.kind === "present" &&
+            after.priceStroops === mutation.body.priceStroops
+          ) {
             removeMutation(mutation.id);
             continue;
           }
