@@ -1,0 +1,6 @@
+source_commit=713050c7d1f0b7a85665dfaff1abffad6851383e
+node=v20.20.2
+npm=10.8.2
+@testing-library/jest-dom package=^6.6.3 lock=^6.6.3 resolved=6.9.1 engines={"node":">=14","npm":">=6","yarn":">=1"}
+eslint package=^9 lock=^9 resolved=9.39.5 engines={"node":"^18.18.0 || ^20.9.0 || >=21.1.0"}
+npm_ci=PASS
