@@ -1,6 +1,7 @@
 import { apiGet, apiPatch, apiPost } from "@/lib/apiClient";
 import {
   SERVICE_MUTATION_QUEUE_STORAGE_KEY,
+  ServiceMutationError,
   flushServiceMutationQueue,
   getServiceMutationQueueSnapshot,
   runServiceMutation,
@@ -42,6 +43,36 @@ describe("serviceMutationQueue", () => {
     expect(result.queued).toBe(true);
     expect(JSON.parse(localStorage.getItem(SERVICE_MUTATION_QUEUE_STORAGE_KEY)!)).toHaveLength(1);
     expect(getServiceMutationQueueSnapshot()).toMatchObject({ pending: 1, conflicts: 0, total: 1 });
+  });
+
+  it("returns a stable typed safe error for immediate server failures", async () => {
+    apiPostMock.mockRejectedValueOnce(
+      Object.assign(new Error("database internals should never reach the UI"), {
+        status: 500,
+      }),
+    );
+
+    let thrown: unknown;
+    try {
+      await runServiceMutation({
+        kind: "service.create",
+        serviceId: "safe-error",
+        path: "/api/v1/services",
+        body: { serviceId: "safe-error", priceStroops: 10 },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ServiceMutationError);
+    expect(thrown).toMatchObject({
+      code: "server_unavailable",
+      serviceId: "safe-error",
+      status: 500,
+      message: "The service could not be saved right now. Try again.",
+    });
+    expect((thrown as Error).message).not.toContain("database internals");
+    expect(getServiceMutationQueueSnapshot().total).toBe(0);
   });
 
   it("flushes queued mutations in creation order", async () => {

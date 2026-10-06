@@ -36,6 +36,31 @@ export type RunServiceMutationResult<T> =
   | { queued: false; data: T }
   | { queued: true; mutation: ServiceMutation };
 
+export type ServiceMutationExecutionErrorCode =
+  | "server_conflict"
+  | "server_rejected"
+  | "server_unavailable"
+  | "rate_limited";
+
+export class ServiceMutationError extends Error {
+  readonly code: ServiceMutationExecutionErrorCode;
+  readonly serviceId: string;
+  readonly status: number | null;
+
+  constructor(
+    code: ServiceMutationExecutionErrorCode,
+    serviceId: string,
+    message: string,
+    status: number | null,
+  ) {
+    super(message);
+    this.name = "ServiceMutationError";
+    this.code = code;
+    this.serviceId = serviceId;
+    this.status = status;
+  }
+}
+
 let flushPromise: Promise<void> | null = null;
 const FLUSH_LOCK = "agentpay:services:mutation-queue-flush";
 
@@ -154,6 +179,42 @@ function isNetworkFailure(error: unknown): boolean {
   return error instanceof TypeError || (error instanceof Error && error.name === "ApiTimeoutError");
 }
 
+function safeExecutionError(serviceId: string, error: unknown): ServiceMutationError {
+  if (error instanceof ServiceMutationError) return error;
+
+  const status = errorStatus(error);
+  if (status === 409 || status === 412) {
+    return new ServiceMutationError(
+      "server_conflict",
+      serviceId,
+      "Server state changed. Refresh the service before retrying.",
+      status,
+    );
+  }
+  if (status === 429 || (error instanceof Error && error.name === "ApiRateLimitedError")) {
+    return new ServiceMutationError(
+      "rate_limited",
+      serviceId,
+      "Too many requests. Try again shortly.",
+      status,
+    );
+  }
+  if (status === null || status >= 500) {
+    return new ServiceMutationError(
+      "server_unavailable",
+      serviceId,
+      "The service could not be saved right now. Try again.",
+      status,
+    );
+  }
+  return new ServiceMutationError(
+    "server_rejected",
+    serviceId,
+    "The server rejected the service change.",
+    status,
+  );
+}
+
 async function sendMutation<T>(
   mutation: Pick<ServiceMutation, "kind" | "path" | "body">,
   signal?: AbortSignal,
@@ -254,7 +315,7 @@ export async function runServiceMutation<T>(
     if (isNetworkFailure(error)) {
       return { queued: true, mutation: await enqueueMutation(input) };
     }
-    throw error;
+    throw safeExecutionError(input.serviceId, error);
   }
 }
 
