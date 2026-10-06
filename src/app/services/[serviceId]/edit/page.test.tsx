@@ -2,6 +2,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import EditServicePage from "./page";
 import { apiGet, apiPatch } from "@/lib/apiClient";
 import { ToastProvider } from "@/components/ToastProvider";
+import {
+  __resetServiceOptimisticStoreForTests,
+  getOptimisticService,
+} from "@/lib/serviceOptimisticStore";
 
 jest.mock("@/lib/apiClient", () => ({
   apiGet: jest.fn(),
@@ -48,6 +52,7 @@ describe("EditServicePage", () => {
     mockApiGet.mockReset();
     mockApiPatch.mockReset();
     mockPush.mockReset();
+    __resetServiceOptimisticStoreForTests();
   });
 
   afterEach(() => {
@@ -215,10 +220,15 @@ describe("EditServicePage", () => {
   // ── Submit: success ───────────────────────────────────────────
 
   it("calls PATCH, shows success toast, clears dirty, and redirects on valid submit", async () => {
-    mockApiGet.mockResolvedValueOnce({
-      serviceId: "svc-1",
-      priceStroops: 1000,
-    } as never);
+    mockApiGet
+      .mockResolvedValueOnce({
+        serviceId: "svc-1",
+        priceStroops: 1000,
+      } as never)
+      .mockResolvedValueOnce({
+        serviceId: "svc-1",
+        priceStroops: 2100,
+      } as never);
     mockApiPatch.mockResolvedValueOnce({} as never);
     renderPage("svc-1");
     const input = await screen.findByLabelText("Price (stroops / request)");
@@ -247,19 +257,32 @@ describe("EditServicePage", () => {
 
   // ── Submit: failure ───────────────────────────────────────────
 
-  it("surfaces PATCH failures as a role=alert", async () => {
+  it("rolls back failed PATCH state and announces a safe message politely", async () => {
     mockApiGet.mockResolvedValueOnce({
       serviceId: "svc-1",
       priceStroops: 1000,
     } as never);
-    mockApiPatch.mockRejectedValueOnce(new Error("Price too high"));
+    mockApiPatch.mockRejectedValueOnce(
+      new Error("database table internals must stay private"),
+    );
     renderPage("svc-1");
     const input = await screen.findByLabelText("Price (stroops / request)");
     fireEvent.change(input, { target: { value: "2000" } });
 
     fireEvent.submit(screen.getByRole("button", { name: "Save" }));
 
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Price too high");
+    await waitFor(() => {
+      expect(getOptimisticService("svc-1")?.priceStroops).toBe(1000);
+    });
+
+    const liveRegion = await screen.findByRole("status");
+    expect(liveRegion).toHaveAttribute("aria-live", "polite");
+    expect(liveRegion).toHaveTextContent(
+      "Could not update the service. Your previous price was restored.",
+    );
+    expect(input).toHaveValue("1000");
+    expect(
+      screen.queryByText("database table internals must stay private"),
+    ).not.toBeInTheDocument();
   });
 });

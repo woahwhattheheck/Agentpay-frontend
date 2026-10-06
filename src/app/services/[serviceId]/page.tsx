@@ -10,6 +10,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { KeyValueGrid } from "@/components/KeyValueGrid";
 import { PageShell } from "@/components/PageShell";
 import { formatStroops } from "@/lib/format";
+import { useOptimisticService } from "@/lib/serviceOptimisticStore";
 
 type Service = { serviceId: string; priceStroops: number };
 type Rollup = { serviceId: string; total: number; agents: number };
@@ -23,6 +24,8 @@ export default function ServiceDetailPage({
   const [service, setService] = useState<Service | null>(null);
   const [rollup, setRollup] = useState<Rollup | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const visibleService = useOptimisticService(serviceId, service);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,7 +49,7 @@ export default function ServiceDetailPage({
         {serviceId}
       </h1>
       {error && <ErrorMessage title="Failed to load service" detail={error} />}
-      {service && (
+      {visibleService && (
         <div className="rounded-lg border border-zinc-200 p-6 dark:border-zinc-800">
           <KeyValueGrid
             rows={[
@@ -61,7 +64,7 @@ export default function ServiceDetailPage({
               },
               {
                 label: "Price",
-                value: `${formatStroops(service.priceStroops)} (${service.priceStroops} stroops)`,
+                value: `${formatStroops(visibleService.priceStroops)} (${visibleService.priceStroops} stroops)`,
               },
               {
                 label: "Usage",

@@ -3,6 +3,10 @@ import { apiGet } from "../../lib/apiClient";
 import ServicesPage, { sortServices } from "./page";
 import { ToastProvider } from "../../components/ToastProvider";
 import { truncateMiddle } from "../../lib/format";
+import {
+  __resetServiceOptimisticStoreForTests,
+  runOptimisticServiceMutation,
+} from "../../lib/serviceOptimisticStore";
 
 jest.mock("../../lib/apiClient", () => ({
   apiGet: jest.fn(),
@@ -251,11 +255,61 @@ describe("sortServices", () => {
 describe("ServicesPage", () => {
   beforeEach(() => {
     apiGetMock.mockReset();
+    __resetServiceOptimisticStoreForTests();
     window.history.replaceState(
       null,
       "",
       "/services"
     );
+  });
+
+  it("projects an optimistic price into the dashboard and rolls back only that service on failure", async () => {
+    apiGetMock.mockResolvedValueOnce({
+      services: [
+        service("svc-a", 100),
+        service("svc-b", 500),
+      ],
+      page: 1,
+      pageCount: 1,
+    } as never);
+
+    renderServicesPage();
+
+    expect(await screen.findByText("100 stroops / request")).toBeInTheDocument();
+    expect(screen.getByText("500 stroops / request")).toBeInTheDocument();
+
+    let rejectWrite!: (reason?: unknown) => void;
+    const write = new Promise<void>((_resolve, reject) => {
+      rejectWrite = reject;
+    });
+    let operation!: Promise<unknown>;
+
+    act(() => {
+      operation = runOptimisticServiceMutation({
+        serviceId: "svc-a",
+        current: service("svc-a", 100),
+        optimistic: service("svc-a", 200),
+        mutate: () => write,
+        reconcile: async () => service("svc-a", 200),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("200 stroops / request")).toBeInTheDocument();
+    });
+    expect(screen.getByText("500 stroops / request")).toBeInTheDocument();
+
+    await act(async () => {
+      rejectWrite(new Error("private backend details"));
+      await expect(operation).rejects.toMatchObject({
+        code: "SERVICE_WRITE_FAILED",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("100 stroops / request")).toBeInTheDocument();
+    });
+    expect(screen.getByText("500 stroops / request")).toBeInTheDocument();
   });
 
   it("renders a spinner while the first page is loading", () => {

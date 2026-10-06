@@ -11,6 +11,7 @@ import { Spinner } from "@/components/Spinner";
 import { truncateMiddle } from "@/lib/format";
 import { useToast } from "@/components/ToastProvider";
 import { useClipboard } from "@/lib/useClipboard";
+import { useOptimisticServices } from "@/lib/serviceOptimisticStore";
 
 type Service = { serviceId: string; priceStroops: number; createdAt?: number | string | null };
 type ServicesResponse = {
@@ -188,7 +189,8 @@ export default function ServicesPage() {
     getInitialSort
   );
 
-  const sortedServices = useSorted(services, sortKey, sortDir);
+  const visibleServices = useOptimisticServices(services);
+  const sortedServices = useSorted(visibleServices, sortKey, sortDir);
 
   const handleSort = (key: SortKey) => {
     const next: { key: SortKey; dir: SortDir } =

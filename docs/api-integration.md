@@ -92,6 +92,26 @@ type TopAgents = { serviceId: string; items: { agent: string; total: number }[] 
 > (e.g. `"1e2"`), and whitespace-padded input. The accepted range is shown as a field
 > hint on both the create (`services/new`) and edit (`services/[serviceId]/edit`) forms.
 
+### Optimistic service price mutations
+
+Price edits use the service-scoped optimistic ledger in
+[`src/lib/serviceOptimisticStore.ts`](../src/lib/serviceOptimisticStore.ts).
+The edited price is published to subscribed dashboard/detail consumers before the
+PATCH resolves. Each service has an independent monotonic mutation revision, so
+an older response cannot replace a newer local edit and unrelated services do
+not block one another.
+
+A successful PATCH is followed by a canonical
+`GET /api/v1/services/{serviceId}`; that response reconciles the optimistic
+entry. If the write fails, only that mutation revision is removed, revealing the
+exact previous canonical value (or the next-newest pending edit). Write failures
+surface the stable `SERVICE_WRITE_FAILED` code with a user-safe message, and
+the edit form announces the rollback through an `aria-live="polite"` status
+region. A write that succeeds but cannot be reconciled is distinguished as
+`SERVICE_RECONCILE_FAILED`; the optimistic value is retained because the
+server write already succeeded.
+
+
 ## Usage
 
 | Method & path | Type | Request body | Response shape | Source |
