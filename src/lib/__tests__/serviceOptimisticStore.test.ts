@@ -74,41 +74,48 @@ describe("serviceOptimisticStore", () => {
     expect(getOptimisticService("svc-a")).toEqual(service("svc-a", 100));
   });
 
-  it("does not let an older response overwrite a newer successful edit", async () => {
+  it("keeps the newest optimistic value visible while serializing same-service writes", async () => {
     hydrateServiceSnapshot(service("svc-a", 100));
 
     const firstWrite = deferred<void>();
     const firstReconcile = deferred<ReturnType<typeof service>>();
     const secondWrite = deferred<void>();
     const secondReconcile = deferred<ReturnType<typeof service>>();
+    const firstMutate = jest.fn(() => firstWrite.promise);
+    const secondMutate = jest.fn(() => secondWrite.promise);
 
     const first = runOptimisticServiceMutation({
       serviceId: "svc-a",
       current: service("svc-a", 100),
       optimistic: service("svc-a", 200),
-      mutate: () => firstWrite.promise,
+      mutate: firstMutate,
       reconcile: () => firstReconcile.promise,
     });
     const second = runOptimisticServiceMutation({
       serviceId: "svc-a",
-      current: service("svc-a", 100),
+      current: service("svc-a", 200),
       optimistic: service("svc-a", 300),
-      mutate: () => secondWrite.promise,
+      mutate: secondMutate,
       reconcile: () => secondReconcile.promise,
     });
 
     expect(getOptimisticService("svc-a")).toEqual(service("svc-a", 300));
-
-    secondWrite.resolve();
-    secondReconcile.resolve(service("svc-a", 300));
-    await second;
-    expect(getOptimisticService("svc-a")).toEqual(service("svc-a", 300));
+    await Promise.resolve();
+    expect(firstMutate).toHaveBeenCalledTimes(1);
+    expect(secondMutate).not.toHaveBeenCalled();
 
     firstWrite.resolve();
-    firstReconcile.resolve(service("svc-a", 200));
+    firstReconcile.resolve(service("svc-a", 225));
     await first;
 
     expect(getOptimisticService("svc-a")).toEqual(service("svc-a", 300));
+
+    secondWrite.resolve();
+    secondReconcile.resolve(service("svc-a", 325));
+    await second;
+
+    expect(secondMutate).toHaveBeenCalledTimes(1);
+    expect(getOptimisticService("svc-a")).toEqual(service("svc-a", 325));
   });
 
   it("keeps unrelated service updates independent while one mutation rolls back", async () => {

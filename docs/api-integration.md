@@ -97,9 +97,11 @@ type TopAgents = { serviceId: string; items: { agent: string; total: number }[] 
 Price edits use the service-scoped optimistic ledger in
 [`src/lib/serviceOptimisticStore.ts`](../src/lib/serviceOptimisticStore.ts).
 The edited price is published to subscribed dashboard/detail consumers before the
-PATCH resolves. Each service has an independent monotonic mutation revision, so
-an older response cannot replace a newer local edit and unrelated services do
-not block one another.
+PATCH resolves. Each service has an independent monotonic mutation revision and
+network queue: same-service PATCH + reconciliation pairs execute in submit order,
+so an older write cannot land after a newer one and leave server state behind the
+newer UI. Queues are independent across services, so unrelated updates still run
+concurrently.
 
 A successful PATCH is followed by a canonical
 `GET /api/v1/services/{serviceId}`; that response reconciles the optimistic

@@ -46,6 +46,7 @@ type OptimisticServiceMutationOptions = {
 
 const entries = new Map<string, ServiceEntry>();
 const listeners = new Set<() => void>();
+const mutationTails = new Map<string, Promise<void>>();
 let storeVersion = 0;
 let nextMutationRevision = 0;
 
@@ -119,6 +120,28 @@ function removePending(
   if (entry.base === null && entry.pending.size === 0) {
     entries.delete(serviceId);
   }
+}
+
+function reserveMutationTurn(serviceId: string) {
+  const previous = mutationTails.get(serviceId) ?? Promise.resolve();
+  const wait: Promise<void> = previous.catch(() => {});
+
+  let releaseCurrent!: () => void;
+  const current = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+  const tail = wait.then(() => current);
+  mutationTails.set(serviceId, tail);
+
+  return {
+    wait,
+    release() {
+      releaseCurrent();
+      if (mutationTails.get(serviceId) === tail) {
+        mutationTails.delete(serviceId);
+      }
+    },
+  };
 }
 
 export function subscribeServiceOptimisticStore(listener: () => void) {
@@ -215,12 +238,12 @@ export function useOptimisticServices(
  * Apply one service mutation immediately and reconcile it with canonical
  * server state after the write succeeds.
  *
- * Each service has its own revision ledger. Older responses can update the
- * hidden base only when no newer successful mutation has already committed.
- * Pending values remain visible only while their revision is newer than the
- * committed base; once a newer mutation commits, older in-flight responses are
- * stale and cannot resurface. A failed mutation removes only its own revision,
- * revealing the newest valid pending value or the committed base.
+ * Optimistic values are published immediately. Network mutation/reconciliation
+ * for one service is serialized in submit order so an older write cannot land
+ * after a newer one and leave server state behind the UI. Different services
+ * keep independent queues and can still progress concurrently. A failed
+ * mutation removes only its own revision, revealing the newest valid pending
+ * value or the committed base.
  */
 export async function runOptimisticServiceMutation(
   options: OptimisticServiceMutationOptions,
@@ -238,50 +261,58 @@ export async function runOptimisticServiceMutation(
   entry.pending.set(revision, cloneService(options.optimistic));
   emitChange();
 
-  try {
-    await options.mutate();
-  } catch {
-    removePending(options.serviceId, entry, revision);
-    emitChange();
-    throw new ServiceMutationError(
-      "SERVICE_WRITE_FAILED",
-      options.serviceId,
-      options.failureMessage ?? DEFAULT_FAILURE_MESSAGE,
-    );
-  }
+  const turn = reserveMutationTurn(options.serviceId);
+  await turn.wait;
 
-  let canonical: ServiceRecord;
   try {
-    canonical = await options.reconcile();
-    if (canonical.serviceId !== options.serviceId) {
-      throw new Error("reconciled service id does not match mutation key");
+    try {
+      await options.mutate();
+    } catch {
+      removePending(options.serviceId, entry, revision);
+      emitChange();
+      throw new ServiceMutationError(
+        "SERVICE_WRITE_FAILED",
+        options.serviceId,
+        options.failureMessage ?? DEFAULT_FAILURE_MESSAGE,
+      );
     }
-  } catch {
+
+    let canonical: ServiceRecord;
+    try {
+      canonical = await options.reconcile();
+      if (canonical.serviceId !== options.serviceId) {
+        throw new Error("reconciled service id does not match mutation key");
+      }
+    } catch {
+      if (revision >= entry.baseRevision) {
+        entry.base = cloneService(options.optimistic);
+        entry.baseRevision = revision;
+      }
+      removePending(options.serviceId, entry, revision);
+      emitChange();
+      throw new ServiceMutationError(
+        "SERVICE_RECONCILE_FAILED",
+        options.serviceId,
+        options.reconcileMessage ?? DEFAULT_RECONCILE_MESSAGE,
+      );
+    }
+
     if (revision >= entry.baseRevision) {
-      entry.base = cloneService(options.optimistic);
+      entry.base = cloneService(canonical);
       entry.baseRevision = revision;
     }
+
     removePending(options.serviceId, entry, revision);
     emitChange();
-    throw new ServiceMutationError(
-      "SERVICE_RECONCILE_FAILED",
-      options.serviceId,
-      options.reconcileMessage ?? DEFAULT_RECONCILE_MESSAGE,
-    );
+    return canonical;
+  } finally {
+    turn.release();
   }
-
-  if (revision >= entry.baseRevision) {
-    entry.base = cloneService(canonical);
-    entry.baseRevision = revision;
-  }
-
-  removePending(options.serviceId, entry, revision);
-  emitChange();
-  return canonical;
 }
 
 export function __resetServiceOptimisticStoreForTests() {
   entries.clear();
+  mutationTails.clear();
   nextMutationRevision = 0;
   emitChange();
 }

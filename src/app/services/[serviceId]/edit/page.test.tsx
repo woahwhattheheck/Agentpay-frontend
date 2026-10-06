@@ -267,7 +267,7 @@ describe("EditServicePage", () => {
 
   // ── Submit: failure ───────────────────────────────────────────
 
-  it("reconciles a surviving older edit after the newer edit rolls back", async () => {
+  it("serializes rapid edits and rolls a failed newer edit back to the first canonical result", async () => {
     const firstWrite = deferred<void>();
 
     mockApiGet
@@ -298,9 +298,10 @@ describe("EditServicePage", () => {
     fireEvent.submit(screen.getByRole("button"));
 
     await waitFor(() => {
-      expect(mockApiPatch).toHaveBeenCalledTimes(2);
-      expect(input).toHaveValue("2000");
+      expect(getOptimisticService("svc-1")?.priceStroops).toBe(3000);
     });
+    expect(mockApiPatch).toHaveBeenCalledTimes(1);
+    expect(input).toHaveValue("3000");
 
     await act(async () => {
       firstWrite.resolve();
@@ -308,6 +309,7 @@ describe("EditServicePage", () => {
     });
 
     await waitFor(() => {
+      expect(mockApiPatch).toHaveBeenCalledTimes(2);
       expect(getOptimisticService("svc-1")?.priceStroops).toBe(2250);
       expect(input).toHaveValue("2250");
     });
