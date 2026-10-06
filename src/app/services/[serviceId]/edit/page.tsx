@@ -3,12 +3,13 @@
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { apiGet, apiPatch } from "@/lib/apiClient";
+import { apiGet } from "@/lib/apiClient";
 import { PageShell } from "@/components/PageShell";
 import { TextField } from "@/components/TextField";
 import { Spinner } from "@/components/Spinner";
 import { useToast } from "@/components/ToastProvider";
 import { parseNonNegativeInt } from "@/lib/validateNumber";
+import { runServiceMutation } from "@/lib/serviceMutationQueue";
 
 type Service = { serviceId: string; priceStroops: number };
 
@@ -27,11 +28,6 @@ export default function EditServicePage({
   const [prefillError, setPrefillError] = useState<string | null>(null);
   const [originalPrice, setOriginalPrice] = useState<string | null>(null);
 
-  /**
-   * Whether the price field differs from the originally-fetched value.
-   * Derived during render (not stored in state) so it stays in sync without a
-   * setState-in-effect. Used by the unsaved-changes guard.
-   */
   const dirty = originalPrice !== null && price !== originalPrice;
 
   useEffect(() => {
@@ -54,11 +50,6 @@ export default function EditServicePage({
     void load();
   }, [serviceId]);
 
-  /*
-   * beforeunload guard: registers a `beforeunload` event on the window
-   * whenever the form is dirty so the browser prompts the operator before
-   * closing or navigating away.
-   */
   useEffect(() => {
     if (!dirty) return;
 
@@ -86,11 +77,18 @@ export default function EditServicePage({
 
     setSaving(true);
     try {
-      await apiPatch(
-        `/api/v1/services/${encodeURIComponent(serviceId)}/price`,
-        { priceStroops: parsed.value }
-      );
+      const result = await runServiceMutation<unknown>({
+        kind: "service.price.update",
+        serviceId,
+        path: `/api/v1/services/${encodeURIComponent(serviceId)}/price`,
+        body: { priceStroops: parsed.value },
+        basePriceStroops: Number(originalPrice),
+      });
       setOriginalPrice(price);
+      if (result.queued) {
+        toast.push("Price change queued. It will sync when you reconnect.", "info");
+        return;
+      }
       toast.push("Price updated.", "info");
       router.push(`/services/${encodeURIComponent(serviceId)}`);
     } catch (err) {
