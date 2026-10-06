@@ -290,7 +290,15 @@ export function flushServiceMutationQueue(): Promise<void> {
         if (before.kind === "unavailable") break;
 
         if (mutation.kind === "service.price.update") {
-          if (before.kind === "missing") break;
+          if (before.kind === "missing") {
+            markConflict(
+              mutation,
+              Object.assign(new Error("Queued update target no longer exists"), {
+                status: 409,
+              }),
+            );
+            break;
+          }
           if (before.priceStroops !== mutation.basePriceStroops) {
             markConflict(mutation, Object.assign(new Error(), { status: 409 }));
             break;
