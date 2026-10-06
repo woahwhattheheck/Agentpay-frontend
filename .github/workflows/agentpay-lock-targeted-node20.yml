@@ -1,0 +1,67 @@
+name: AgentPay targeted Node 20 lock repair
+
+on:
+  push:
+    branches:
+      - ci/agentpay-lock-targeted-node20-sol56
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Repair only the two merge-corrupted major upgrades
+        shell: bash
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund --save-dev @testing-library/jest-dom@6.9.1 eslint@9.39.5
+          node - <<'NODE'
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          pkg.devDependencies['@testing-library/jest-dom'] = '^6.6.3';
+          pkg.devDependencies.eslint = '^9';
+          lock.packages[''].devDependencies['@testing-library/jest-dom'] = '^6.6.3';
+          lock.packages[''].devDependencies.eslint = '^9';
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          fs.writeFileSync('package-lock.json', JSON.stringify(lock, null, 2) + '\n');
+          NODE
+      - name: Prove clean install on Node 20
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Persist repair and exact receipt
+        shell: bash
+        run: |
+          {
+            echo "source_commit=${GITHUB_SHA}"
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            node - <<'NODE'
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          for (const name of ['@testing-library/jest-dom','eslint']) {
+            const spec = pkg.devDependencies[name];
+            const lockSpec = lock.packages[''].devDependencies[name];
+            const entry = lock.packages['node_modules/' + name];
+            console.log(name + ' package=' + spec + ' lock=' + lockSpec + ' resolved=' + entry.version + ' engines=' + JSON.stringify(entry.engines || null));
+          }
+          NODE
+            echo "npm_ci=PASS"
+          } > .github/agentpay-lock-targeted-receipt.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json .github/agentpay-lock-targeted-receipt.txt
+          git commit -m "fix(ci): repair Node 20 lock dependency majors [skip ci]"
+          generated_commit="$(git rev-parse HEAD)"
+          git push
+          printf 'generated_commit=%s\n' "$generated_commit" > .github/agentpay-lock-targeted-head.txt
+          git add .github/agentpay-lock-targeted-head.txt
+          git commit -m "chore(ci): expose targeted lock commit [skip ci]"
+          git push
