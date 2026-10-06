@@ -43,7 +43,7 @@ describe("useAdminStatusAnnouncement", () => {
     const { result, rerender } = renderHook(
       ({ paused, fetchStatus }) =>
         useAdminStatusAnnouncement(paused, fetchStatus),
-      { initialProps: { paused: null as boolean | null, fetchStatus: "loading" as const } }
+      { initialProps: { paused: null as boolean | null, fetchStatus: "loading" as Parameters<typeof useAdminStatusAnnouncement>[1] } }
     );
 
     expect(result.current).toBe("");
