@@ -99,6 +99,7 @@ function mockResponse(
     },
     body: null,
     bodyUsed: false,
+    bytes: async () => { throw new Error("not implemented"); },
     arrayBuffer: async () => { throw new Error("not implemented"); },
     blob: async () => { throw new Error("not implemented"); },
     formData: async () => { throw new Error("not implemented"); },
