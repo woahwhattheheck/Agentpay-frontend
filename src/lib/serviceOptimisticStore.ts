@@ -94,6 +94,13 @@ function visibleValue(entry: ServiceEntry): ServiceRecord | null {
   let newest: ServiceRecord | null = null;
 
   for (const [revision, service] of entry.pending) {
+    // A newer successful mutation may commit while an older request is still
+    // in flight. Once the base has advanced past that request, the older
+    // optimistic value is stale and must never become visible again.
+    if (revision <= entry.baseRevision) {
+      continue;
+    }
+
     if (revision > newestRevision) {
       newestRevision = revision;
       newest = service;
@@ -209,10 +216,11 @@ export function useOptimisticServices(
  * server state after the write succeeds.
  *
  * Each service has its own revision ledger. Older responses can update the
- * hidden base only when no newer successful mutation has already committed,
- * while the newest pending optimistic value always stays visible. A failed
- * mutation removes only its own revision, revealing the newest remaining
- * value or the exact pre-mutation base.
+ * hidden base only when no newer successful mutation has already committed.
+ * Pending values remain visible only while their revision is newer than the
+ * committed base; once a newer mutation commits, older in-flight responses are
+ * stale and cannot resurface. A failed mutation removes only its own revision,
+ * revealing the newest valid pending value or the committed base.
  */
 export async function runOptimisticServiceMutation(
   options: OptimisticServiceMutationOptions,
