@@ -13,6 +13,7 @@ import {
   hydrateServiceSnapshot,
   runOptimisticServiceMutation,
   ServiceMutationError,
+  useOptimisticService,
 } from "@/lib/serviceOptimisticStore";
 
 type Service = { serviceId: string; priceStroops: number };
@@ -42,6 +43,21 @@ export default function EditServicePage({
 
   const dirty = originalPrice !== null && price !== originalPrice;
   const saving = pendingSaves > 0;
+  const visibleService = useOptimisticService(serviceId, serverService);
+
+  useEffect(() => {
+    if (!visibleService || dirty || saving) {
+      return;
+    }
+
+    const visiblePrice = String(visibleService.priceStroops);
+    if (price === visiblePrice && originalPrice === visiblePrice) {
+      return;
+    }
+
+    setPrice(visiblePrice);
+    setOriginalPrice(visiblePrice);
+  }, [visibleService, dirty, saving, price, originalPrice]);
 
   useEffect(() => {
     const load = async () => {
