@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import ServiceDetailPage from "./page";
 import { apiGet } from "@/lib/apiClient";
+import { __resetServiceOptimisticStoreForTests } from "@/lib/serviceOptimisticStore";
 
 jest.mock("@/lib/apiClient", () => ({
   apiGet: jest.fn(),
@@ -40,6 +41,7 @@ describe("ServiceDetailPage", () => {
 
   beforeEach(() => {
     mockApiGet.mockReset();
+    __resetServiceOptimisticStoreForTests();
     // Mock navigator.clipboard
     Object.defineProperty(global.navigator, "clipboard", {
       value: {

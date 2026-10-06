@@ -40,6 +40,7 @@ export default function EditServicePage({
   const [originalPrice, setOriginalPrice] = useState<string | null>(null);
   const [serverService, setServerService] = useState<Service | null>(null);
   const submitGenerationRef = useRef(0);
+  const dirtyRef = useRef(false);
 
   const dirty = originalPrice !== null && price !== originalPrice;
   const saving = pendingSaves > 0;
@@ -86,10 +87,13 @@ export default function EditServicePage({
   }, [serviceId]);
 
   useEffect(() => {
+    dirtyRef.current = dirty;
     if (!dirty) return;
 
     const handler = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
+      if (dirtyRef.current) {
+        event.preventDefault();
+      }
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
@@ -151,6 +155,7 @@ export default function EditServicePage({
         return;
       }
 
+      dirtyRef.current = false;
       const canonicalPrice = String(canonical.priceStroops);
       setServerService(canonical);
       setPrice(canonicalPrice);
@@ -169,6 +174,7 @@ export default function EditServicePage({
       const rolledBack = getOptimisticService(serviceId);
 
       if (rolledBack) {
+        dirtyRef.current = false;
         const rolledBackPrice = String(rolledBack.priceStroops);
         setServerService(rolledBack);
         setPrice(rolledBackPrice);
