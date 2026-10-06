@@ -1,0 +1,25 @@
+name: AgentPay 624 fork validation
+
+on:
+  push:
+    branches:
+      - validate/agentpay624-npm-install-20261006
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install from declared package ranges
+        run: npm install --no-audit --no-fund
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test -- --runInBand
+      - name: Build
+        run: npm run build
