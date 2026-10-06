@@ -49,3 +49,8 @@ jobs:
           git add package-lock.json .github/agentpay-lock-regen-receipt.txt
           git commit -m "chore(ci): regenerate Node 20 lock receipt [skip ci]"
           git push
+          generated_commit="$(git rev-parse HEAD)"
+          printf 'generated_commit=%s\n' "$generated_commit" > .github/agentpay-lock-generated-head.txt
+          git add .github/agentpay-lock-generated-head.txt
+          git commit -m "chore(ci): expose generated lock commit [skip ci]"
+          git push
