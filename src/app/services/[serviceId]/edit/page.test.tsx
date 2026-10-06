@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import EditServicePage from "./page";
 import { apiGet, apiPatch } from "@/lib/apiClient";
 import { ToastProvider } from "@/components/ToastProvider";
@@ -35,6 +35,16 @@ jest.mock("next/navigation", () => ({
 
 const mockApiGet = apiGet as jest.MockedFunction<typeof apiGet>;
 const mockApiPatch = apiPatch as jest.MockedFunction<typeof apiPatch>;
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function renderPage(serviceId: string) {
   const params = Promise.resolve({ serviceId }) as Promise<{
@@ -256,6 +266,54 @@ describe("EditServicePage", () => {
   });
 
   // ── Submit: failure ───────────────────────────────────────────
+
+  it("reconciles a surviving older edit after the newer edit rolls back", async () => {
+    const firstWrite = deferred<void>();
+
+    mockApiGet
+      .mockResolvedValueOnce({
+        serviceId: "svc-1",
+        priceStroops: 1000,
+      } as never)
+      .mockResolvedValueOnce({
+        serviceId: "svc-1",
+        priceStroops: 2250,
+      } as never);
+    mockApiPatch
+      .mockReturnValueOnce(firstWrite.promise as never)
+      .mockRejectedValueOnce(new Error("newer edit failed"));
+
+    renderPage("svc-1");
+    const input = await screen.findByLabelText("Price (stroops / request)");
+
+    fireEvent.change(input, { target: { value: "2000" } });
+    fireEvent.submit(screen.getByRole("button"));
+
+    await waitFor(() => {
+      expect(mockApiPatch).toHaveBeenCalledTimes(1);
+      expect(getOptimisticService("svc-1")?.priceStroops).toBe(2000);
+    });
+
+    fireEvent.change(input, { target: { value: "3000" } });
+    fireEvent.submit(screen.getByRole("button"));
+
+    await waitFor(() => {
+      expect(mockApiPatch).toHaveBeenCalledTimes(2);
+      expect(input).toHaveValue("2000");
+    });
+
+    await act(async () => {
+      firstWrite.resolve();
+      await firstWrite.promise;
+    });
+
+    await waitFor(() => {
+      expect(getOptimisticService("svc-1")?.priceStroops).toBe(2250);
+      expect(input).toHaveValue("2250");
+    });
+
+    expect(mockPush).not.toHaveBeenCalled();
+  });
 
   it("rolls back failed PATCH state and announces a safe message politely", async () => {
     mockApiGet.mockResolvedValueOnce({
