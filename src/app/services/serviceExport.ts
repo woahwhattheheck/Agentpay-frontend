@@ -22,9 +22,15 @@ export class ServiceExportError extends Error {
 
 const CSV_HEADER = "serviceId,priceStroops,createdAt";
 
+const SPREADSHEET_FORMULA_PREFIX = /^[\t\r\n ]*[=+\-@]/;
+
 export function escapeCsvCell(value: string): string {
-  // Prefix spreadsheet formula triggers before CSV quoting so exported data is inert.
-  const neutralized = /^[=+\-@]/.test(value) ? `'${value}` : value;
+  // Spreadsheet importers may ignore leading whitespace/control characters
+  // before deciding that a cell is a formula. Prefix the original value so it
+  // stays inert without trimming or otherwise changing user data.
+  const neutralized = SPREADSHEET_FORMULA_PREFIX.test(value)
+    ? `'${value}`
+    : value;
   return `"${neutralized.replace(/"/g, '""')}"`;
 }
 
