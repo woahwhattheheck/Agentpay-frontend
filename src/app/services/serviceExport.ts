@@ -20,6 +20,18 @@ export class ServiceExportError extends Error {
   }
 }
 
+export function filterServicesForView<T extends ServiceExportRow>(
+  services: readonly T[],
+  query: string,
+): T[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return services.slice();
+
+  return services.filter((service) =>
+    service.serviceId.toLowerCase().includes(normalizedQuery),
+  );
+}
+
 const CSV_HEADER = "serviceId,priceStroops,createdAt";
 
 const SPREADSHEET_FORMULA_PREFIX = /^[\t\r\n ]*[=+\-@]/;
