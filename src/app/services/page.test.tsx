@@ -311,6 +311,30 @@ describe("ServicesPage", () => {
     expect(screen.queryByRole("navigation", { name: /pagination/i })).not.toBeInTheDocument();
   });
 
+  it("filters the rendered current view from the service-ID control", async () => {
+    apiGetMock.mockResolvedValueOnce({
+      services: [
+        service("svc-alpha", 10),
+        service("svc-beta", 20),
+      ],
+      page: 1,
+      pageCount: 1,
+    } as never);
+
+    renderServicesPage();
+
+    expect(await screen.findByRole("link", { name: /svc-alpha/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /svc-beta/i })).toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: /filter services by service id/i }),
+      { target: { value: "ALPHA" } },
+    );
+
+    expect(screen.getByRole("link", { name: /svc-alpha/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /svc-beta/i })).not.toBeInTheDocument();
+  });
+
   it("renders services using the order selected in the URL", async () => {
     window.history.replaceState(
       null,
