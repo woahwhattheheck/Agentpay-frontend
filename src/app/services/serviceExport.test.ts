@@ -1,6 +1,7 @@
 import {
   buildServiceExport,
   escapeCsvCell,
+  filterServicesForView,
   serializeServicesCsv,
   serializeServicesJson,
   type ServiceExportRow,
@@ -12,12 +13,11 @@ const rows: ServiceExportRow[] = [
 ];
 
 describe("serviceExport", () => {
-  it("exports only the supplied current view and preserves its display order", () => {
-    const filteredAndSorted = [rows[1]];
+  it("exports only the active filtered view and preserves its display order", () => {
+    const filtered = filterServicesForView(rows, "SVC-A");
 
-    expect(JSON.parse(serializeServicesJson(filteredAndSorted))).toEqual([
-      rows[1],
-    ]);
+    expect(filtered).toEqual([rows[1]]);
+    expect(JSON.parse(serializeServicesJson(filtered))).toEqual([rows[1]]);
   });
 
   it("quotes commas, quotes and newlines in CSV cells", () => {
