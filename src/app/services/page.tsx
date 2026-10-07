@@ -12,6 +12,7 @@ import { truncateMiddle } from "@/lib/format";
 import { useToast } from "@/components/ToastProvider";
 import { useClipboard } from "@/lib/useClipboard";
 import { ServiceExportActions } from "./ServiceExportActions";
+import { filterServicesForView } from "./serviceExport";
 
 type Service = { serviceId: string; priceStroops: number; createdAt?: number | string | null };
 type ServicesResponse = {
@@ -185,11 +186,16 @@ export default function ServicesPage() {
   const [page, setPage] = useState(1);
   const [requestedPage, setRequestedPage] = useState(1);
   const [pageCount, setPageCount] = useState(1);
+  const [filterQuery, setFilterQuery] = useState("");
   const [{ key: sortKey, dir: sortDir }, setSort] = useState<{ key: SortKey; dir: SortDir }>(
     getInitialSort
   );
 
-  const sortedServices = useSorted(services, sortKey, sortDir);
+  const filteredServices = useMemo(
+    () => (services ? filterServicesForView(services, filterQuery) : services),
+    [services, filterQuery]
+  );
+  const sortedServices = useSorted(filteredServices, sortKey, sortDir);
 
   const handleSort = (key: SortKey) => {
     const next: { key: SortKey; dir: SortDir } =
@@ -267,6 +273,19 @@ export default function ServicesPage() {
         </Link>
       </header>
       <ErrorMessage title="Failed to load services" detail={error} />
+      {!loading && !error && services && services.length > 0 && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium">Filter services</span>
+          <input
+            type="search"
+            value={filterQuery}
+            onChange={(event) => setFilterQuery(event.target.value)}
+            placeholder="Filter by service ID"
+            aria-label="Filter services by service ID"
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-950"
+          />
+        </label>
+      )}
       {!loading && !error && services && (
         <ServiceExportActions services={sortedServices ?? []} />
       )}
@@ -289,7 +308,12 @@ export default function ServicesPage() {
           }
         />
       )}
-      {!loading && services && services.length > 0 && (
+      {!loading && !error && services && services.length > 0 && sortedServices?.length === 0 && (
+        <p role="status" className="py-6 text-sm text-zinc-600 dark:text-zinc-400">
+          No services match this filter.
+        </p>
+      )}
+      {!loading && services && sortedServices && sortedServices.length > 0 && (
         <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
           {sortedServices?.map((s) => (
             <li
