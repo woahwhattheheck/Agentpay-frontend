@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, act } from "@testing-library/react";
 import { apiGet } from "../../lib/apiClient";
-import ServicesPage, { sortServices } from "./page";
+import ServicesPage, { filterServices, readServicesViewState, servicesViewSearch, sortServices } from "./page";
 import { ToastProvider } from "../../components/ToastProvider";
 import { truncateMiddle } from "../../lib/format";
 
@@ -248,6 +248,46 @@ describe("sortServices", () => {
   });
 });
 
+
+describe("services table view helpers", () => {
+  it("filters service IDs case-insensitively and applies the price enum", () => {
+    const services = [
+      service("Alpha-Free", 0),
+      service("alpha-paid", 25),
+      service("beta-paid", 50),
+    ];
+
+    expect(
+      filterServices(services, "ALPHA", "paid")?.map((item) => item.serviceId)
+    ).toEqual(["alpha-paid"]);
+    expect(
+      filterServices(services, "", "free")?.map((item) => item.serviceId)
+    ).toEqual(["Alpha-Free"]);
+  });
+
+  it("normalizes invalid URL state and serializes only canonical view state", () => {
+    expect(
+      readServicesViewState("?page=-2&sort=bogus&dir=desc&price=bogus&q=alpha")
+    ).toEqual({
+      page: 1,
+      sortKey: "",
+      sortDir: "asc",
+      query: "alpha",
+      priceFilter: "all",
+    });
+
+    expect(
+      servicesViewSearch({
+        page: 3,
+        sortKey: "price",
+        sortDir: "desc",
+        query: "alpha beta",
+        priceFilter: "paid",
+      })
+    ).toBe("?page=3&sort=price&dir=desc&q=alpha+beta&price=paid");
+  });
+});
+
 describe("ServicesPage", () => {
   beforeEach(() => {
     apiGetMock.mockReset();
@@ -353,6 +393,115 @@ describe("ServicesPage", () => {
     ]);
   });
 
+  it("cycles stable column sorting and keeps the canonical sort in the URL", async () => {
+    apiGetMock.mockResolvedValueOnce({
+      services: [
+        service("svc-expensive", 300),
+        service("svc-cheap", 100),
+      ],
+      page: 1,
+      pageCount: 1,
+    } as never);
+
+    renderServicesPage();
+    await screen.findByRole("link", { name: /svc-expensive/i });
+
+    const priceSort = screen.getByRole("button", { name: /sort by price/i });
+    fireEvent.click(priceSort);
+
+    expect(window.location.search).toBe("?sort=price&dir=asc");
+    let serviceLinks = screen
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("href") !== "/services/new");
+    expect(serviceLinks.map((link) => link.getAttribute("href"))).toEqual([
+      "/services/svc-cheap",
+      "/services/svc-expensive",
+    ]);
+
+    fireEvent.click(priceSort);
+    expect(window.location.search).toBe("?sort=price&dir=desc");
+    serviceLinks = screen
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("href") !== "/services/new");
+    expect(serviceLinks.map((link) => link.getAttribute("href"))).toEqual([
+      "/services/svc-expensive",
+      "/services/svc-cheap",
+    ]);
+
+    fireEvent.click(priceSort);
+    expect(window.location.search).toBe("");
+  });
+
+  it("debounces the text filter, narrows rows, and syncs the URL", async () => {
+    apiGetMock.mockResolvedValueOnce({
+      services: [
+        service("svc-alpha", 10),
+        service("svc-beta", 20),
+      ],
+      page: 1,
+      pageCount: 1,
+    } as never);
+
+    renderServicesPage();
+    await screen.findByRole("link", { name: /svc-alpha/i });
+
+    fireEvent.change(screen.getByRole("searchbox", { name: /filter services/i }), {
+      target: { value: "beta" },
+    });
+
+    await waitFor(
+      () => {
+        expect(window.location.search).toBe("?q=beta");
+        expect(screen.queryByRole("link", { name: /svc-alpha/i })).not.toBeInTheDocument();
+        expect(screen.getByRole("link", { name: /svc-beta/i })).toBeInTheDocument();
+      },
+      { timeout: 1000 }
+    );
+  });
+
+  it("restores page, filters, and sort state from a shareable URL", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/services?page=2&sort=price&dir=desc&q=beta&price=paid"
+    );
+    apiGetMock.mockResolvedValueOnce({
+      services: [
+        service("beta-paid", 30),
+        service("beta-free", 0),
+        service("alpha-paid", 40),
+      ],
+      page: 2,
+      pageCount: 3,
+    } as never);
+
+    renderServicesPage();
+
+    await waitFor(() => {
+      expect(apiGetMock).toHaveBeenCalledWith("/api/v1/services?page=2&limit=25");
+    });
+    expect(screen.getByRole("searchbox", { name: /filter services/i })).toHaveValue("beta");
+    expect(screen.getByRole("combobox", { name: /price type/i })).toHaveValue("paid");
+    expect(screen.getByRole("link", { name: /beta-paid/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /beta-free/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /alpha-paid/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 3")).toBeInTheDocument();
+  });
+
+  it("shows a distinct filtered-empty state without claiming the dataset is empty", async () => {
+    window.history.replaceState(null, "", "/services?q=missing");
+    apiGetMock.mockResolvedValueOnce({
+      services: [service("svc-present", 10)],
+      page: 1,
+      pageCount: 1,
+    } as never);
+
+    renderServicesPage();
+
+    expect(await screen.findByText("No services match these filters.")).toBeInTheDocument();
+    expect(screen.queryByText(/No services registered yet/i)).not.toBeInTheDocument();
+  });
+
   it("shows pagination only when there are multiple pages and refetches when Next is clicked", async () => {
     apiGetMock
       .mockResolvedValueOnce({
@@ -378,6 +527,7 @@ describe("ServicesPage", () => {
     });
 
     expect(await screen.findByText("Page 2 of 2")).toBeInTheDocument();
+    expect(window.location.search).toBe("?page=2");
     expect(screen.getByRole("link", { name: /svc-b/i })).toHaveAttribute(
       "href",
       "/services/svc-b"
