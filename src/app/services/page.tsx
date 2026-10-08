@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { apiGet } from "@/lib/apiClient";
 import { ErrorMessage } from "@/components/ErrorMessage";
@@ -10,7 +10,7 @@ import { Pagination } from "@/components/Pagination";
 import { Spinner } from "@/components/Spinner";
 import { truncateMiddle } from "@/lib/format";
 import { useToast } from "@/components/ToastProvider";
-import { useClipboard } from "@/lib/useClipboard";
+import { useClipboard } from "@/lib/useClipboard";\nimport { getRovingTargetIndex, isRovingActivationKey } from "@/lib/rovingList";
 
 type Service = { serviceId: string; priceStroops: number; createdAt?: number | string | null };
 type ServicesResponse = {
@@ -188,7 +188,23 @@ export default function ServicesPage() {
     getInitialSort
   );
 
+  const serviceLinkRefs = useRef(new Map<string, HTMLAnchorElement>());
+  const [activeServiceId, setActiveServiceId] = useState<string | null>(null);
   const sortedServices = useSorted(services, sortKey, sortDir);
+  const serviceRows = sortedServices ?? [];
+  const resolvedActiveServiceId =
+    activeServiceId &&
+    serviceRows.some((service) => service.serviceId === activeServiceId)
+      ? activeServiceId
+      : serviceRows[0]?.serviceId ?? null;
+
+  // Keep one primary row link in the tab order, even when paging or sorting
+  // replaces/reorders the rendered list.
+  useEffect(() => {
+    if (activeServiceId !== resolvedActiveServiceId) {
+      setActiveServiceId(resolvedActiveServiceId);
+    }
+  }, [activeServiceId, resolvedActiveServiceId]);
 
   const handleSort = (key: SortKey) => {
     const next: { key: SortKey; dir: SortDir } =
@@ -216,6 +232,35 @@ export default function ServicesPage() {
     setError(null);
     setServices(null);
     setRequestedPage(nextPage);
+  };
+
+  const focusServiceAt = (index: number) => {
+    const serviceId = serviceRows[index]?.serviceId;
+    if (!serviceId) return;
+
+    setActiveServiceId(serviceId);
+    serviceLinkRefs.current.get(serviceId)?.focus();
+  };
+
+  const handleServiceKeyDown = (
+    event: React.KeyboardEvent<HTMLAnchorElement>,
+    index: number
+  ) => {
+    if (isRovingActivationKey(event.key)) {
+      event.preventDefault();
+      event.currentTarget.click();
+      return;
+    }
+
+    const nextIndex = getRovingTargetIndex(
+      index,
+      serviceRows.length,
+      event.key
+    );
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    focusServiceAt(nextIndex);
   };
 
   useEffect(() => {
@@ -286,14 +331,27 @@ export default function ServicesPage() {
         />
       )}
       {!loading && services && services.length > 0 && (
-        <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
-          {sortedServices?.map((s) => (
+        <ul
+          aria-label="Services"
+          className="divide-y divide-zinc-200 dark:divide-zinc-800"
+        >
+          {serviceRows.map((s, index) => (
             <li
               key={s.serviceId}
               className="-mx-4 flex items-center justify-between rounded-lg px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900"
             >
               <Link
+                ref={(node) => {
+                  if (node) {
+                    serviceLinkRefs.current.set(s.serviceId, node);
+                  } else {
+                    serviceLinkRefs.current.delete(s.serviceId);
+                  }
+                }}
                 href={`/services/${encodeURIComponent(s.serviceId)}`}
+                tabIndex={s.serviceId === resolvedActiveServiceId ? 0 : -1}
+                onFocus={() => setActiveServiceId(s.serviceId)}
+                onKeyDown={(event) => handleServiceKeyDown(event, index)}
                 className="flex flex-1 items-center justify-between rounded-lg hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:hover:bg-zinc-900"
               >
                 <span
