@@ -7,7 +7,8 @@ import { ErrorMessage } from "@/components/ErrorMessage";
 import { EmptyState } from "@/components/EmptyState";
 import { PageShell } from "@/components/PageShell";
 import { Pagination } from "@/components/Pagination";
-import { Spinner } from "@/components/Spinner";
+import { ServicesDashboardSkeleton } from "./ServicesDashboardSkeleton";
+import { ServicesSectionBoundary } from "./ServicesSectionBoundary";
 import { truncateMiddle } from "@/lib/format";
 import { useToast } from "@/components/ToastProvider";
 import { useClipboard } from "@/lib/useClipboard";
@@ -177,6 +178,64 @@ export function ServiceCopyButton({ serviceId }: { serviceId: string }) {
   );
 }
 
+
+function ServicesResults({
+  services,
+  sortKey,
+  sortDir,
+}: {
+  services: Service[];
+  sortKey: SortKey;
+  sortDir: SortDir;
+}) {
+  const sortedServices = useSorted(services, sortKey, sortDir);
+
+  if (services.length === 0) {
+    return (
+      <EmptyState
+        title="No services registered yet."
+        description="Create the first service to start tracking request pricing."
+        action={
+          <Link
+            href="/services/new"
+            className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:bg-white dark:text-black"
+          >
+            New service
+          </Link>
+        }
+      />
+    );
+  }
+
+  return (
+    <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
+      {sortedServices?.map((service) => (
+        <li
+          key={service.serviceId}
+          className="-mx-4 flex min-h-12 items-center justify-between rounded-lg px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900"
+        >
+          <Link
+            href={`/services/${encodeURIComponent(service.serviceId)}`}
+            className="flex flex-1 items-center justify-between rounded-lg hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:hover:bg-zinc-900"
+          >
+            <span
+              className="font-mono text-sm"
+              title={service.serviceId}
+              aria-label={service.serviceId}
+            >
+              {truncateMiddle(service.serviceId)}
+            </span>
+            <span className="text-sm text-zinc-600 dark:text-zinc-400">
+              {service.priceStroops} stroops / request
+            </span>
+          </Link>
+          <ServiceCopyButton serviceId={service.serviceId} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function ServicesPage() {
   const [services, setServices] = useState<Service[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -187,8 +246,6 @@ export default function ServicesPage() {
   const [{ key: sortKey, dir: sortDir }, setSort] = useState<{ key: SortKey; dir: SortDir }>(
     getInitialSort
   );
-
-  const sortedServices = useSorted(services, sortKey, sortDir);
 
   const handleSort = (key: SortKey) => {
     const next: { key: SortKey; dir: SortDir } =
@@ -266,59 +323,26 @@ export default function ServicesPage() {
         </Link>
       </header>
       <ErrorMessage title="Failed to load services" detail={error} />
-      {loading && (
-        <div className="flex justify-center py-10">
-          <Spinner label="Loading services" />
-        </div>
-      )}
-      {!loading && services && services.length === 0 && (
-        <EmptyState
-          title="No services registered yet."
-          description="Create the first service to start tracking request pricing."
-          action={
-            <Link
-              href="/services/new"
-              className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:bg-white dark:text-black"
-            >
-              New service
-            </Link>
-          }
-        />
-      )}
-      {!loading && services && services.length > 0 && (
-        <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
-          {sortedServices?.map((s) => (
-            <li
-              key={s.serviceId}
-              className="-mx-4 flex items-center justify-between rounded-lg px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900"
-            >
-              <Link
-                href={`/services/${encodeURIComponent(s.serviceId)}`}
-                className="flex flex-1 items-center justify-between rounded-lg hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:hover:bg-zinc-900"
-              >
-                <span
-                  className="font-mono text-sm"
-                  title={s.serviceId}
-                  aria-label={s.serviceId}
-                >
-                  {truncateMiddle(s.serviceId)}
-                </span>
-                <span className="text-sm text-zinc-600 dark:text-zinc-400">
-                  {s.priceStroops} stroops / request
-                </span>
-              </Link>
-              <ServiceCopyButton serviceId={s.serviceId} />
-            </li>
-          ))}
-        </ul>
-      )}
-      {!loading && !error && (
-        <Pagination
-          page={page}
-          pageCount={pageCount}
-          onChange={onPageChange}
-        />
-      )}
+      <ServicesSectionBoundary sectionName="Service list">
+        {loading ? (
+          <ServicesDashboardSkeleton />
+        ) : services ? (
+          <ServicesResults
+            services={services}
+            sortKey={sortKey}
+            sortDir={sortDir}
+          />
+        ) : null}
+      </ServicesSectionBoundary>
+      <ServicesSectionBoundary sectionName="Pagination">
+        {!loading && !error && (
+          <Pagination
+            page={page}
+            pageCount={pageCount}
+            onChange={onPageChange}
+          />
+        )}
+      </ServicesSectionBoundary>
     </PageShell>
   );
 }
