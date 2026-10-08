@@ -6,8 +6,24 @@ import {
   type ReactNode,
 } from "react";
 
+export const SERVICES_SECTION_ERROR_CODES = {
+  serviceList: "SERVICES_LIST_RENDER_FAILED",
+  pagination: "SERVICES_PAGINATION_RENDER_FAILED",
+} as const;
+
+export type ServicesSectionErrorCode =
+  (typeof SERVICES_SECTION_ERROR_CODES)[keyof typeof SERVICES_SECTION_ERROR_CODES];
+
+export type ServicesSectionFailure = {
+  code: ServicesSectionErrorCode;
+  section: string;
+  error: Error;
+  componentStack: string | null;
+};
+
 type ServicesSectionBoundaryProps = {
   sectionName: string;
+  errorCode: ServicesSectionErrorCode;
   children: ReactNode;
 };
 
@@ -33,11 +49,14 @@ export class ServicesSectionBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("Services dashboard section failed", {
+    const failure: ServicesSectionFailure = {
+      code: this.props.errorCode,
       section: this.props.sectionName,
       error,
       componentStack: info.componentStack,
-    });
+    };
+
+    console.error("Services dashboard section failed", failure);
   }
 
   private retry = () => {
@@ -61,6 +80,12 @@ export class ServicesSectionBoundary extends Component<
         <p className="mt-1 text-rose-700 dark:text-rose-400">
           This section hit an unexpected error. The rest of the dashboard is
           still available.
+        </p>
+        <p
+          data-testid="services-section-error-code"
+          className="mt-2 font-mono text-xs text-rose-700 dark:text-rose-400"
+        >
+          Reference: {this.props.errorCode}
         </p>
         <button
           type="button"

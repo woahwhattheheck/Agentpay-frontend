@@ -3,7 +3,10 @@ import { apiGet } from "../../lib/apiClient";
 import { ToastProvider } from "../../components/ToastProvider";
 import ServicesPage from "./page";
 import { ServicesDashboardSkeleton } from "./ServicesDashboardSkeleton";
-import { ServicesSectionBoundary } from "./ServicesSectionBoundary";
+import {
+  SERVICES_SECTION_ERROR_CODES,
+  ServicesSectionBoundary,
+} from "./ServicesSectionBoundary";
 
 jest.mock("../../lib/apiClient", () => ({
   apiGet: jest.fn(),
@@ -85,17 +88,31 @@ describe("services dashboard resilience", () => {
     render(
       <>
         <div>Healthy dashboard sibling</div>
-        <ServicesSectionBoundary sectionName="Service list">
+        <ServicesSectionBoundary
+          sectionName="Service list"
+          errorCode={SERVICES_SECTION_ERROR_CODES.serviceList}
+        >
           <BrokenSection />
         </ServicesSectionBoundary>
       </>
     );
 
     expect(screen.getByText("Healthy dashboard sibling")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Service list unavailable."
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Service list unavailable.");
+    expect(alert).toHaveTextContent(
+      `Reference: ${SERVICES_SECTION_ERROR_CODES.serviceList}`
     );
-    expect(consoleError).toHaveBeenCalled();
+    expect(alert).not.toHaveTextContent("render exploded");
+    expect(consoleError).toHaveBeenCalledWith(
+      "Services dashboard section failed",
+      expect.objectContaining({
+        code: SERVICES_SECTION_ERROR_CODES.serviceList,
+        section: "Service list",
+        error: expect.any(Error),
+        componentStack: expect.any(String),
+      })
+    );
 
     consoleError.mockRestore();
   });
@@ -114,7 +131,10 @@ describe("services dashboard resilience", () => {
     }
 
     render(
-      <ServicesSectionBoundary sectionName="Service list">
+      <ServicesSectionBoundary
+        sectionName="Service list"
+        errorCode={SERVICES_SECTION_ERROR_CODES.serviceList}
+      >
         <FlakySection />
       </ServicesSectionBoundary>
     );

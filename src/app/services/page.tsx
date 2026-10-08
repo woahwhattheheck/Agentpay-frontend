@@ -8,7 +8,10 @@ import { EmptyState } from "@/components/EmptyState";
 import { PageShell } from "@/components/PageShell";
 import { Pagination } from "@/components/Pagination";
 import { ServicesDashboardSkeleton } from "./ServicesDashboardSkeleton";
-import { ServicesSectionBoundary } from "./ServicesSectionBoundary";
+import {
+  SERVICES_SECTION_ERROR_CODES,
+  ServicesSectionBoundary,
+} from "./ServicesSectionBoundary";
 import { truncateMiddle } from "@/lib/format";
 import { useToast } from "@/components/ToastProvider";
 import { useClipboard } from "@/lib/useClipboard";
@@ -323,7 +326,10 @@ export default function ServicesPage() {
         </Link>
       </header>
       <ErrorMessage title="Failed to load services" detail={error} />
-      <ServicesSectionBoundary sectionName="Service list">
+      <ServicesSectionBoundary
+        sectionName="Service list"
+        errorCode={SERVICES_SECTION_ERROR_CODES.serviceList}
+      >
         {loading ? (
           <ServicesDashboardSkeleton />
         ) : services ? (
@@ -334,7 +340,10 @@ export default function ServicesPage() {
           />
         ) : null}
       </ServicesSectionBoundary>
-      <ServicesSectionBoundary sectionName="Pagination">
+      <ServicesSectionBoundary
+        sectionName="Pagination"
+        errorCode={SERVICES_SECTION_ERROR_CODES.pagination}
+      >
         {!loading && !error && (
           <Pagination
             page={page}
