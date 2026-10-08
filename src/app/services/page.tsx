@@ -10,7 +10,8 @@ import { Pagination } from "@/components/Pagination";
 import { Spinner } from "@/components/Spinner";
 import { truncateMiddle } from "@/lib/format";
 import { useToast } from "@/components/ToastProvider";
-import { useClipboard } from "@/lib/useClipboard";\nimport { getRovingTargetIndex, isRovingActivationKey } from "@/lib/rovingList";
+import { useClipboard } from "@/lib/useClipboard";
+import { getRovingTargetIndex, isRovingActivationKey } from "@/lib/rovingList";
 
 type Service = { serviceId: string; priceStroops: number; createdAt?: number | string | null };
 type ServicesResponse = {
