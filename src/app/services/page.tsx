@@ -11,14 +11,14 @@ import { Spinner } from "@/components/Spinner";
 import { truncateMiddle } from "@/lib/format";
 import { useToast } from "@/components/ToastProvider";
 import { useClipboard } from "@/lib/useClipboard";
-
-type Service = { serviceId: string; priceStroops: number; createdAt?: number | string | null };
-type ServicesResponse = {
-  services?: Service[];
-  items?: Service[];
-  page?: number;
-  pageCount?: number;
-};
+import {
+  type ServiceRow as Service,
+  type ServicesFetchResponse,
+  type ServicesFetchState,
+  loadingServices,
+  resolveServices,
+  failedServices,
+} from "@/lib/servicesFetchState";
 
 type SortKey = "name" | "price" | "created" | "";
 type SortDir = "asc" | "desc";
@@ -178,17 +178,19 @@ export function ServiceCopyButton({ serviceId }: { serviceId: string }) {
 }
 
 export default function ServicesPage() {
-  const [services, setServices] = useState<Service[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
+  // One discriminated union prevents stale content appearing behind errors/loading.
+  const [servicesState, setServicesState] = useState<ServicesFetchState>(loadingServices);
   const [requestedPage, setRequestedPage] = useState(1);
-  const [pageCount, setPageCount] = useState(1);
+  const [retryGeneration, setRetryGeneration] = useState(0);
   const [{ key: sortKey, dir: sortDir }, setSort] = useState<{ key: SortKey; dir: SortDir }>(
     getInitialSort
   );
 
-  const sortedServices = useSorted(services, sortKey, sortDir);
+  const sortedServices = useSorted(
+    servicesState.status === "success" ? servicesState.services : null,
+    sortKey,
+    sortDir
+  );
 
   const handleSort = (key: SortKey) => {
     const next: { key: SortKey; dir: SortDir } =
@@ -212,47 +214,37 @@ export default function ServicesPage() {
   }, []);
 
   const onPageChange = (nextPage: number) => {
-    setLoading(true);
-    setError(null);
-    setServices(null);
+    if (!Number.isSafeInteger(nextPage) || nextPage < 1) return;
+    setServicesState(loadingServices());
     setRequestedPage(nextPage);
   };
 
-  useEffect(() => {
-    let cancelled = false;
+  const retry = () => {
+    // Refetch even when the requested page has not changed.
+    setServicesState(loadingServices());
+    setRetryGeneration((generation) => generation + 1);
+  };
 
-    apiGet<ServicesResponse>(
+  useEffect(() => {
+    // Cancellation keeps an older request from committing after page/retry.
+    let cancelled = false;
+    setServicesState(loadingServices());
+
+    apiGet<ServicesFetchResponse>(
       `/api/v1/services?page=${requestedPage}&limit=${PAGE_SIZE}`
     )
       .then((body) => {
-        if (cancelled) return;
-
-        const nextServices = body.services ?? body.items ?? [];
-        const nextPageCount = Math.max(body.pageCount ?? 1, 1);
-        const nextPage = Math.min(
-          Math.max(body.page ?? requestedPage, 1),
-          nextPageCount
-        );
-
-        setServices(nextServices);
-        setPageCount(nextPageCount);
-        setPage(nextPage);
+        if (!cancelled) setServicesState(resolveServices(body, requestedPage));
       })
-      .catch((e) => {
-        if (cancelled) return;
-        setError(e.message ?? "failed to load");
-        setPageCount(1);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
+      .catch(() => {
+        // Do not expose network/server exceptions or internal endpoints to users.
+        if (!cancelled) setServicesState(failedServices());
       });
 
     return () => {
       cancelled = true;
     };
-  }, [requestedPage]);
+  }, [requestedPage, retryGeneration]);
 
   return (
     <PageShell>
@@ -265,27 +257,42 @@ export default function ServicesPage() {
           New service
         </Link>
       </header>
-      <ErrorMessage title="Failed to load services" detail={error} />
-      {loading && (
+      {servicesState.status === "error" && (
+        <ErrorMessage
+          title="Failed to load services"
+          detail={`${servicesState.error.code}: ${servicesState.error.message}`}
+          onRetry={retry}
+        />
+      )}
+      {servicesState.status === "loading" && (
         <div className="flex justify-center py-10">
           <Spinner label="Loading services" />
         </div>
       )}
-      {!loading && services && services.length === 0 && (
-        <EmptyState
-          title="No services registered yet."
-          description="Create the first service to start tracking request pricing."
-          action={
-            <Link
-              href="/services/new"
-              className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:bg-white dark:text-black"
-            >
-              New service
-            </Link>
-          }
-        />
+      {servicesState.status === "empty" && (
+        <>
+          <span aria-live="polite" aria-atomic="true" className="sr-only">
+            No services available
+          </span>
+          <EmptyState
+            title="No services registered yet."
+            description="Create the first service to start tracking request pricing."
+            action={
+              <Link
+                href="/services/new"
+                className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:bg-white dark:text-black"
+              >
+                New service
+              </Link>
+            }
+          />
+        </>
       )}
-      {!loading && services && services.length > 0 && (
+      {servicesState.status === "success" && (
+        <>
+          <span aria-live="polite" aria-atomic="true" className="sr-only">
+            { `Loaded ${servicesState.services.length} services` }
+          </span>
         <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
           {sortedServices?.map((s) => (
             <li
@@ -311,11 +318,12 @@ export default function ServicesPage() {
             </li>
           ))}
         </ul>
+        </>
       )}
-      {!loading && !error && (
+      {(servicesState.status === "success" || servicesState.status === "empty") && (
         <Pagination
-          page={page}
-          pageCount={pageCount}
+          page={servicesState.page}
+          pageCount={servicesState.pageCount}
           onChange={onPageChange}
         />
       )}
