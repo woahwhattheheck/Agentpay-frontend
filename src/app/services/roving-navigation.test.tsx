@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";\nimport userEvent from "@testing-library/user-event";
 import { apiGet } from "../../lib/apiClient";
 import ServicesPage from "./page";
 import { ToastProvider } from "../../components/ToastProvider";
@@ -33,7 +33,8 @@ describe("services roving keyboard navigation", () => {
     window.history.replaceState(null, "", "/services");
   });
 
-  it("exposes exactly one primary service link as the list tab stop", async () => {
+  it("tabs into exactly one primary service link", async () => {
+    const user = userEvent.setup();
     apiGetMock.mockResolvedValueOnce({
       services: [
         service("svc-a", 10),
@@ -50,6 +51,11 @@ describe("services roving keyboard navigation", () => {
     const links = serviceLinks();
     expect(links.map((link) => link.tabIndex)).toEqual([0, -1, -1]);
     expect(links[0].className).toContain("focus-visible:outline");
+
+    await user.tab();
+    expect(screen.getByRole("link", { name: /new service/i })).toHaveFocus();
+    await user.tab();
+    expect(links[0]).toHaveFocus();
   });
 
   it("moves focus with ArrowDown and ArrowUp while keeping one tab stop", async () => {
