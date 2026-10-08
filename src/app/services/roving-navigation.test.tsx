@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";\nimport userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { apiGet } from "../../lib/apiClient";
 import ServicesPage from "./page";
 import { ToastProvider } from "../../components/ToastProvider";
