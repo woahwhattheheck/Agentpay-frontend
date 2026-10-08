@@ -22,24 +22,77 @@ type ServicesResponse = {
 
 type SortKey = "name" | "price" | "created" | "";
 type SortDir = "asc" | "desc";
+type PriceFilter = "all" | "free" | "paid";
+type ViewState = {
+  page: number;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  query: string;
+  priceFilter: PriceFilter;
+};
 
 const PAGE_SIZE = 25;
-const VALID_SORT_KEYS: SortKey[] = ["name", "price", "created"];
+const FILTER_DEBOUNCE_MS = 300;
+const VALID_SORT_KEYS: Exclude<SortKey, "">[] = ["name", "price", "created"];
+const VALID_PRICE_FILTERS: PriceFilter[] = ["all", "free", "paid"];
 
-const COLUMNS: { key: SortKey; label: string }[] = [
+const COLUMNS: { key: Exclude<SortKey, "">; label: string }[] = [
   { key: "name", label: "Name" },
   { key: "price", label: "Price" },
   { key: "created", label: "Created" },
 ];
 
-function getInitialSort(): { key: SortKey; dir: SortDir } {
-  if (typeof window === "undefined") return { key: "", dir: "asc" };
-  const params = new URLSearchParams(window.location.search);
-  const s = params.get("sort") as SortKey | null;
-  const d = params.get("dir") as SortDir | null;
-  const key = s && (VALID_SORT_KEYS as string[]).includes(s) ? s : "";
-  const dir = d === "asc" || d === "desc" ? d : "asc";
-  return { key, dir };
+function parsePage(value: string | null): number {
+  if (value === null) return 1;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export function readServicesViewState(
+  search = typeof window === "undefined" ? "" : window.location.search
+): ViewState {
+  const params = new URLSearchParams(search);
+  const rawSort = params.get("sort");
+  const sortKey = VALID_SORT_KEYS.includes(rawSort as Exclude<SortKey, "">)
+    ? (rawSort as Exclude<SortKey, "">)
+    : "";
+  const rawDir = params.get("dir");
+  const sortDir: SortDir =
+    sortKey && (rawDir === "asc" || rawDir === "desc") ? rawDir : "asc";
+  const rawPrice = params.get("price");
+  const priceFilter = VALID_PRICE_FILTERS.includes(rawPrice as PriceFilter)
+    ? (rawPrice as PriceFilter)
+    : "all";
+
+  return {
+    page: parsePage(params.get("page")),
+    sortKey,
+    sortDir,
+    query: params.get("q") ?? "",
+    priceFilter,
+  };
+}
+
+export function servicesViewSearch(state: ViewState): string {
+  const params = new URLSearchParams();
+  if (state.page > 1) params.set("page", String(state.page));
+  if (state.sortKey) {
+    params.set("sort", state.sortKey);
+    params.set("dir", state.sortDir);
+  }
+  if (state.query) params.set("q", state.query);
+  if (state.priceFilter !== "all") params.set("price", state.priceFilter);
+  const search = params.toString();
+  return search ? "?" + search : "";
+}
+
+function replaceServicesViewUrl(state: ViewState) {
+  if (typeof window === "undefined") return;
+  window.history.replaceState(
+    null,
+    "",
+    window.location.pathname + servicesViewSearch(state) + window.location.hash
+  );
 }
 
 function getAriaSort(key: SortKey, sortKey: SortKey, sortDir: SortDir): "ascending" | "descending" | "none" {
@@ -112,15 +165,47 @@ export function sortServices(
     .map(({ service }) => service);
 }
 
-function useSorted(
+export function filterServices(
   services: Service[] | null,
+  query: string,
+  priceFilter: PriceFilter
+): Service[] | null {
+  if (!services) return services;
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+
+  return services.filter((service) => {
+    const textMatches =
+      normalizedQuery.length === 0 ||
+      service.serviceId.toLocaleLowerCase().includes(normalizedQuery);
+    const priceMatches =
+      priceFilter === "all" ||
+      (priceFilter === "free"
+        ? service.priceStroops === 0
+        : service.priceStroops > 0);
+    return textMatches && priceMatches;
+  });
+}
+
+function useVisibleServices(
+  services: Service[] | null,
+  query: string,
+  priceFilter: PriceFilter,
   sortKey: SortKey,
   sortDir: SortDir
 ): Service[] | null {
-  return useMemo(
-    () => sortServices(services, sortKey, sortDir),
-    [services, sortKey, sortDir]
-  );
+  return useMemo(() => {
+    const filtered = filterServices(services, query, priceFilter);
+    return sortServices(filtered, sortKey, sortDir);
+  }, [services, query, priceFilter, sortKey, sortDir]);
+}
+
+function formatCreatedAt(createdAt?: number | string | null) {
+  if (createdAt == null) return "—";
+  const numeric = Number(createdAt);
+  const date = Number.isFinite(numeric)
+    ? new Date(numeric)
+    : new Date(String(createdAt));
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
 }
 
 export function ServiceCopyButton({ serviceId }: { serviceId: string }) {
@@ -178,40 +263,100 @@ export function ServiceCopyButton({ serviceId }: { serviceId: string }) {
 }
 
 export default function ServicesPage() {
+  const initialView = useMemo(() => readServicesViewState(), []);
   const [services, setServices] = useState<Service[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [requestedPage, setRequestedPage] = useState(1);
+  const [page, setPage] = useState(initialView.page);
+  const [requestedPage, setRequestedPage] = useState(initialView.page);
   const [pageCount, setPageCount] = useState(1);
-  const [{ key: sortKey, dir: sortDir }, setSort] = useState<{ key: SortKey; dir: SortDir }>(
-    getInitialSort
+  const [view, setView] = useState<ViewState>(initialView);
+  const [filterDraft, setFilterDraft] = useState(initialView.query);
+
+  const visibleServices = useVisibleServices(
+    services,
+    view.query,
+    view.priceFilter,
+    view.sortKey,
+    view.sortDir
   );
 
-  const sortedServices = useSorted(services, sortKey, sortDir);
+  const handleSort = (key: Exclude<SortKey, "">) => {
+    let sortKey: SortKey = key;
+    let sortDir: SortDir = "asc";
 
-  const handleSort = (key: SortKey) => {
-    const next: { key: SortKey; dir: SortDir } =
-      key === sortKey
-        ? { key, dir: sortDir === "asc" ? "desc" : "asc" }
-        : { key, dir: "asc" };
-    setSort(next);
-    const params = new URLSearchParams(window.location.search);
-    params.set("sort", next.key);
-    params.set("dir", next.dir);
-    window.history.replaceState(null, "", `?${params.toString()}`);
+    if (view.sortKey === key && view.sortDir === "asc") {
+      sortDir = "desc";
+    } else if (view.sortKey === key && view.sortDir === "desc") {
+      sortKey = "";
+    }
+
+    const next = { ...view, sortKey, sortDir };
+    setView(next);
+    replaceServicesViewUrl(next);
   };
 
   useEffect(() => {
     const handlePopState = () => {
-      const { key, dir } = getInitialSort();
-      setSort({ key, dir });
+      const next = readServicesViewState();
+      setView(next);
+      setFilterDraft(next.query);
+      setLoading(true);
+      setError(null);
+      setServices(null);
+      setRequestedPage(next.page);
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  useEffect(() => {
+    if (filterDraft === view.query) return;
+
+    const timeout = window.setTimeout(() => {
+      const next = { ...view, query: filterDraft, page: 1 };
+      setView(next);
+      replaceServicesViewUrl(next);
+      if (requestedPage !== 1) {
+        setLoading(true);
+        setError(null);
+        setServices(null);
+        setRequestedPage(1);
+      }
+    }, FILTER_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [filterDraft, requestedPage, view]);
+
+  const handlePriceFilter = (priceFilter: PriceFilter) => {
+    const next = { ...view, priceFilter, page: 1 };
+    setView(next);
+    replaceServicesViewUrl(next);
+    if (requestedPage !== 1) {
+      setLoading(true);
+      setError(null);
+      setServices(null);
+      setRequestedPage(1);
+    }
+  };
+
+  const clearFilters = () => {
+    setFilterDraft("");
+    const next = { ...view, query: "", priceFilter: "all" as PriceFilter, page: 1 };
+    setView(next);
+    replaceServicesViewUrl(next);
+    if (requestedPage !== 1) {
+      setLoading(true);
+      setError(null);
+      setServices(null);
+      setRequestedPage(1);
+    }
+  };
+
   const onPageChange = (nextPage: number) => {
+    const next = { ...view, page: nextPage };
+    setView(next);
+    replaceServicesViewUrl(next);
     setLoading(true);
     setError(null);
     setServices(null);
@@ -237,6 +382,13 @@ export default function ServicesPage() {
         setServices(nextServices);
         setPageCount(nextPageCount);
         setPage(nextPage);
+        if (nextPage !== requestedPage) {
+          setView((current) => {
+            const next = { ...current, page: nextPage };
+            replaceServicesViewUrl(next);
+            return next;
+          });
+        }
       })
       .catch((e) => {
         if (cancelled) return;
@@ -266,11 +418,52 @@ export default function ServicesPage() {
         </Link>
       </header>
       <ErrorMessage title="Failed to load services" detail={error} />
+
+      <div className="grid gap-3 rounded-xl border border-zinc-200 p-4 sm:grid-cols-[minmax(0,1fr)_12rem_auto] dark:border-zinc-800">
+        <label className="grid gap-1 text-sm font-medium">
+          <span>Filter services</span>
+          <input
+            type="search"
+            value={filterDraft}
+            onChange={(event) => setFilterDraft(event.target.value)}
+            placeholder="Service ID"
+            className="rounded-lg border border-zinc-300 bg-transparent px-3 py-2 font-normal outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700"
+          />
+        </label>
+        <label className="grid gap-1 text-sm font-medium">
+          <span>Price type</span>
+          <select
+            value={view.priceFilter}
+            onChange={(event) =>
+              handlePriceFilter(event.target.value as PriceFilter)
+            }
+            className="rounded-lg border border-zinc-300 bg-transparent px-3 py-2 font-normal outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700"
+          >
+            <option value="all">All prices</option>
+            <option value="free">Free</option>
+            <option value="paid">Paid</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={clearFilters}
+          disabled={
+            filterDraft.length === 0 &&
+            view.query.length === 0 &&
+            view.priceFilter === "all"
+          }
+          className="self-end rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700"
+        >
+          Clear filters
+        </button>
+      </div>
+
       {loading && (
         <div className="flex justify-center py-10">
           <Spinner label="Loading services" />
         </div>
       )}
+
       {!loading && services && services.length === 0 && (
         <EmptyState
           title="No services registered yet."
@@ -285,34 +478,104 @@ export default function ServicesPage() {
           }
         />
       )}
-      {!loading && services && services.length > 0 && (
-        <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
-          {sortedServices?.map((s) => (
-            <li
-              key={s.serviceId}
-              className="-mx-4 flex items-center justify-between rounded-lg px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900"
+
+      {!loading &&
+        services &&
+        services.length > 0 &&
+        visibleServices &&
+        visibleServices.length === 0 && (
+          <div
+            role="status"
+            className="rounded-xl border border-dashed border-zinc-300 px-6 py-10 text-center dark:border-zinc-700"
+          >
+            <p className="font-medium">No services match these filters.</p>
+            <p className="mt-1 text-sm text-zinc-500">
+              Clear or adjust the current filters to see this page&apos;s services.
+            </p>
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="mt-4 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium dark:border-zinc-700"
             >
-              <Link
-                href={`/services/${encodeURIComponent(s.serviceId)}`}
-                className="flex flex-1 items-center justify-between rounded-lg hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:hover:bg-zinc-900"
-              >
-                <span
-                  className="font-mono text-sm"
-                  title={s.serviceId}
-                  aria-label={s.serviceId}
+              Clear filters
+            </button>
+          </div>
+        )}
+
+      {!loading && visibleServices && visibleServices.length > 0 && (
+        <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+          <table className="w-full border-collapse" aria-label="Services">
+            <thead className="bg-zinc-50 text-left text-sm dark:bg-zinc-900">
+              <tr>
+                {COLUMNS.map((column) => (
+                  <th
+                    key={column.key}
+                    scope="col"
+                    aria-sort={getAriaSort(
+                      column.key,
+                      view.sortKey,
+                      view.sortDir
+                    )}
+                    className="px-4 py-3 font-medium"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleSort(column.key)}
+                      className="inline-flex items-center gap-1 rounded px-1 py-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                      aria-label={"Sort by " + column.label}
+                    >
+                      {column.label}
+                      <span aria-hidden="true">
+                        {view.sortKey === column.key
+                          ? view.sortDir === "asc"
+                            ? "↑"
+                            : "↓"
+                          : "↕"}
+                      </span>
+                    </button>
+                  </th>
+                ))}
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+              {visibleServices.map((service) => (
+                <tr
+                  key={service.serviceId}
+                  className="transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900"
                 >
-                  {truncateMiddle(s.serviceId)}
-                </span>
-                <span className="text-sm text-zinc-600 dark:text-zinc-400">
-                  {s.priceStroops} stroops / request
-                </span>
-              </Link>
-              <ServiceCopyButton serviceId={s.serviceId} />
-            </li>
-          ))}
-        </ul>
+                  <td className="px-4 py-3">
+                    <Link
+                      href={"/services/" + encodeURIComponent(service.serviceId)}
+                      className="inline-flex rounded-lg font-mono text-sm hover:bg-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:hover:bg-zinc-900"
+                      title={service.serviceId}
+                      aria-label={service.serviceId}
+                    >
+                      {truncateMiddle(service.serviceId)}
+                      <span className="sr-only">
+                        {" " + service.priceStroops + " stroops / request"}
+                      </span>
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
+                    {service.priceStroops} stroops / request
+                  </td>
+                  <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
+                    {formatCreatedAt(service.createdAt)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <ServiceCopyButton serviceId={service.serviceId} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-      {!loading && !error && (
+
+      {!loading && !error && services && services.length > 0 && (
         <Pagination
           page={page}
           pageCount={pageCount}
